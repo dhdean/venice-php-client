@@ -196,6 +196,33 @@ class Venice {
         return $this->currentConversation();
     }
 
+    public function getConversationById(int $id)
+    {
+        if ($id < 1000) {
+            $conversations = $this->getConversationList();
+            foreach($conversations as $conversation) {
+                if ($conversation['index'] == $id) {
+                    return $conversation;
+                    break;
+                }
+                if ($conversation['id'] == $id) {
+                    return $conversation;
+                    break;
+                }
+            }
+        }
+        throw new \Exception('Conversation does not exist.');
+    }
+
+    public function trash(int $id)
+    {
+        if (!file_exists($this->path."/$id")) {
+            throw new \Exception("Conversation $id does not exist.");
+        }
+        return unlink($this->path."/$id");
+    }
+
+
     public function replay()
     {
         print("\n");
@@ -217,6 +244,7 @@ function usage()
     $usage .= "php venice.php ls (List conversations)\n";
     $usage .= "php venice.php switch <conversation id> (Switch to another conversation id)\n";
     $usage .= "php venice.php replay (replay conversation)\n";
+    $usage .= "php venice.php trash <conversation id> (trash a conversation)\n";
     return $usage;
 }
 
@@ -224,33 +252,51 @@ if (count($argv) < 2) {
     die(usage());
 }
 
-if (!in_array($argv[1], ['ask','new','ls','switch','current','replay'])) {
+if (!in_array($argv[1], ['ask','new','ls','switch','current','replay','trash'])) {
     print("\nInvalid action '{$argv[1]}'\n");
     die(usage());
 }
 
 $venice = new Venice(parse_ini_file(__DIR__.'/vconf.ini'));
 
-switch ($argv[1]) {
-    case 'new':
-        $venice->newConversation();
-    case 'ask':
-        print("\n\n");
-        $responses = $venice->askQuestion($argv[2]);
-        foreach ($responses as $response) {
-            print(($response['content'] ?? 'null')."\n");
-        }
-        break;
-    case 'ls':
-        print("\n\n".$venice->listConversations()."\n");
-        break;
-    case 'current':
-        print("\n\n".$venice->currentConversation()."\n");
-        break;
-    case 'switch':
-        print("\n\n".$venice->switch($argv[2])."\n");
-        break;
-    case 'replay':
-        print("\n\n".$venice->replay()."\n");
-        break;
+try { 
+    switch ($argv[1]) {
+        case 'new':
+            $venice->newConversation();
+        case 'ask':
+            print("\n\n");
+            $responses = $venice->askQuestion($argv[2]);
+            foreach ($responses as $response) {
+                print(($response['content'] ?? 'null')."\n");
+            }
+            break;
+        case 'ls':
+            print("\n\n".$venice->listConversations()."\n");
+            break;
+        case 'current':
+            print("\n\n".$venice->currentConversation()."\n");
+            break;
+        case 'switch':
+            print("\n\n".$venice->switch($argv[2])."\n");
+            break;
+        case 'replay':
+            print("\n\n".$venice->replay()."\n");
+            break;
+        case 'trash':
+            $conversation = $venice->getConversationById($argv[2]);
+            print("\n\n(".$conversation['index'].") ".$conversation['id']." : ".$conversation['preview']."\n");
+            $confirmation = readline("Are you sure you want to trash this conversation? (y/n): ");
+            if (strtolower($confirmation) === 'y') {
+                if ($venice->trash($conversation['id'])) {
+                    print("\n\n Trashed ".$conversation['id']."\n");
+                } else {
+                    throw new \Exception('Failed to trash '.$conversation['id']);
+                }
+            } else {
+                print "\n\nAction cancelled.\n";
+            }
+            break;
+    }
+} catch (\Exception $e) {
+    print("\nERROR: ".$e->getMessage()."\n");
 }
