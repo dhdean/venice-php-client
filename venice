@@ -1,62 +1,32 @@
 #!/usr/bin/env php
 <?php
 
+require_once(__DIR__.'/Conversations.php');
+
 class Venice {
 
     private $path;
-    private $currentId;
     private $token;
+    private $conversations;
 
     public function __construct(array $ini)
     {
+        if (!isset($ini['conversations']) || !$ini['conversations']) {
+            throw new \Exception('INI file is missing conversations path.');
+        }
+        $this->conversations = new Conversations($ini['conversations']);
         $this->path = $ini['conversations'];
+        if (!isset($ini['token']) || !$ini['token']) {
+            throw new \Exception('INI file is missing API token.');
+        }
         $this->token = $ini['token'];
-        self::getCurrentConversationId($this->path);
-        if (!$this->path || !$this->currentId) {
-            throw new \Exception('Invalid configuration');
-        }
-    }
-
-    public function getConversation(): array
-    {
-        $file = file_get_contents($this->path.'/'.$this->currentId);
-        return json_decode($file, true);
-    }
-
-    public function saveConversation(array $conversation)
-    {
-        file_put_contents($this->path.'/'.$this->currentId, json_encode($conversation));
-    }
-
-    public function getCurrentConversationId($path)
-    {
-        $dir = $path;
-        $glob = glob($dir . '/*');
-
-        if (!file_exists($this->path."/.current")) {
-            $this->newConversation();
-        }
-
-        $file = file_get_contents($this->path."/.current");
-        $this->currentId = $file;
     }
 
     public function newConversation() {
-        $name = (microtime(true)*10000);
-        touch($this->path.'/'.$name);
-        $this->currentId = $name;
-        $this->saveConversation([]);
-        file_put_contents($this->path."/.current", $name);
+        return $this->conversations->newConversationId();
     }
 
-    public function saveQuestion($question)
-    {
-        $covno = $this->getConversation();
-        $convo[] = $this->newQuestion($question['messages']);
-        file_put_contents($this->path.'/'.$this->currentId, json_encode($file));
-    }
-
-    public function newQuery()
+    private function newQuery()
     {
         return [
             "model" => "venice-uncensored", 
@@ -66,7 +36,7 @@ class Venice {
         ];
     }
 
-    public function query($body) {
+    private function query($body) {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, 'https://api.venice.ai/api/v1/chat/completions');
         curl_setopt($ch, CURLOPT_POST, 1);
@@ -103,17 +73,17 @@ class Venice {
         }
     }
 
-    public function askQuestion($question)
+    public function askQuestion(string $question)
     {
-        $convo = $this->getConversation();
+        $conversationId = $this->conversations->getCurrentConversationId();
+        $convo = $this->conversations->getConversation($conversationId);
         $query = $this->newQuery();
         $convo[] = ['role' => 'user', 'content' => $question];
         $query['messages'] = $convo;
         $response = $this->query($query);
         $responses = [];
         if (!isset($response['choices'])) {
-            print_r($response);
-            die("\nOops\n");
+            throw new \Exception("Got an unexpected response: ".json_encode($response));
         }
         foreach ($response['choices'] as $choice) {
             $responses[] = [
@@ -124,42 +94,14 @@ class Venice {
         foreach ($responses as $resp) {
             $convo[] = $resp;
         }
-        $this->saveConversation($convo);
+        $this->conversations->saveConversation($conversationId, $convo);
         return $responses;
-    }
-
-    private function getConversationList()
-    {
-        $dir = $this->path;
-        $glob = glob($dir . '/*');
-
-        $conversations = [];
-
-        $i = 1;
-        foreach ($glob as $file) {
-            if (is_file($file)) {
-                $raw = file_get_contents($file);
-                $body = json_decode($raw, true);
-                $conversations[] = [
-                    'index' => $i,
-                    'id' => basename($file),
-                    'preview' => ($body[0]['content'] ?? 'null')
-                ];
-                $i++;
-            }
-        }
-        return $conversations;
     }
 
     public function listConversations()
     {
-        $dir = $this->path;
-        $glob = glob($dir . '/*');
         $list = [];
-
-        $i = 1;
-        $conversations = $this->getConversationList();
-
+        $conversations = $this->conversations->getConversations();
         foreach ($conversations as $conversation) {
             $substr = substr($conversation['id']." : ".$conversation['preview'], 0, 120);
             if (strlen($substr) >= 120) {
@@ -172,15 +114,15 @@ class Venice {
 
     public function currentConversation()
     {
-        $raw = file_get_contents($this->path.'/'.$this->currentId);
-        $body = json_decode($raw, true);
-        return $this->currentId." : ".($body[0]['content'] ?? 'null');
+        $conversationId = $this->conversations->getCurrentConversationId();
+        $convo = $this->conversations->getConversation($conversationId);
+        return $conversationId." : ".($convo[0]['content'] ?? 'null');
     }
 
     public function switch(int $id)
     {
         if ($id < 1000) {
-            $conversations = $this->getConversationList();
+            $conversations = $this->conversations->getConversations();
             foreach($conversations as $conversation) {
                 if ($conversation['index'] == $id) {
                     $id = $conversation['id'];
@@ -188,18 +130,14 @@ class Venice {
                 }
             }
         }
-        if (!file_exists($this->path."/$id")) {
-            throw new \Exception("Conversation $id does not exist.");
-        }
-        file_put_contents($this->path."/.current", $id);
-        $this->currentId = $id;
+        $this->conversations->setCurrentConversationId($id);
         return $this->currentConversation();
     }
 
     public function getConversationById(int $id)
     {
         if ($id < 1000) {
-            $conversations = $this->getConversationList();
+            $conversations = $this->conversations->getConversations();
             foreach($conversations as $conversation) {
                 if ($conversation['index'] == $id) {
                     return $conversation;
@@ -216,17 +154,14 @@ class Venice {
 
     public function trash(int $id)
     {
-        if (!file_exists($this->path."/$id")) {
-            throw new \Exception("Conversation $id does not exist.");
-        }
-        return unlink($this->path."/$id");
+        return $this->conversations->trash($id);
     }
-
 
     public function replay()
     {
         print("\n");
-        $convo = $this->getConversation();
+        $conversationId = $this->conversations->getCurrentConversationId();
+        $convo = $this->conversations->getConversation($conversationId);
         foreach($convo as $comment) {
             if ($comment['role'] == 'user') {
                 print("\n----------------------User---------------------------\n");
@@ -240,11 +175,12 @@ class Venice {
 
 function usage()
 {
-    $usage  = "php venice.php new|ask 'question' (Ask question on an existing conversation, or create a new one)\n";
-    $usage .= "php venice.php ls (List conversations)\n";
-    $usage .= "php venice.php switch <conversation id> (Switch to another conversation id)\n";
-    $usage .= "php venice.php replay (replay conversation)\n";
-    $usage .= "php venice.php trash <conversation id> (trash a conversation)\n";
+    $usage  = "venice new|ask 'question' (Ask question on an existing conversation, or create a new one)\n";
+    $usage .= "venice ls                 (List conversations)\n";
+    $usage .= "venice current            (Show current conversation)\n";
+    $usage .= "venice switch <conv id>   (Switch to another conversation id)\n";
+    $usage .= "venice replay             (Replay conversation)\n";
+    $usage .= "venice trash <conv id>    (Trash a conversation)\n";
     return $usage;
 }
 
