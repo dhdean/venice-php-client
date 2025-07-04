@@ -1,0 +1,256 @@
+#!/usr/bin/env php
+<?php
+
+class Venice {
+
+    private $path;
+    private $currentId;
+    private $token;
+
+    public function __construct(array $ini)
+    {
+        $this->path = $ini['conversations'];
+        $this->token = $ini['token'];
+        self::getCurrentConversationId($this->path);
+        if (!$this->path || !$this->currentId) {
+            throw new \Exception('Invalid configuration');
+        }
+    }
+
+    public function getConversation(): array
+    {
+        $file = file_get_contents($this->path.'/'.$this->currentId);
+        return json_decode($file, true);
+    }
+
+    public function saveConversation(array $conversation)
+    {
+        file_put_contents($this->path.'/'.$this->currentId, json_encode($conversation));
+    }
+
+    public function getCurrentConversationId($path)
+    {
+        $dir = $path;
+        $glob = glob($dir . '/*');
+
+        if (!file_exists($this->path."/.current")) {
+            $this->newConversation();
+        }
+
+        $file = file_get_contents($this->path."/.current");
+        $this->currentId = $file;
+    }
+
+    public function newConversation() {
+        $name = (microtime(true)*10000);
+        touch($this->path.'/'.$name);
+        $this->currentId = $name;
+        $this->saveConversation([]);
+        file_put_contents($this->path."/.current", $name);
+    }
+
+    public function saveQuestion($question)
+    {
+        $covno = $this->getConversation();
+        $convo[] = $this->newQuestion($question['messages']);
+        file_put_contents($this->path.'/'.$this->currentId, json_encode($file));
+    }
+
+    public function newQuery()
+    {
+        return [
+            "model" => "venice-uncensored", 
+            "messages" => [
+            ],
+            "stream" => false
+        ];
+    }
+
+    public function query($body) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://api.venice.ai/api/v1/chat/completions');
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+
+        $headers = [
+            'Authorization: Bearer '.$this->token,
+            'Content-Type: application/json'
+        ];
+
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Curl (vfan)');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        if (!empty($headers)) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        }
+        $response = curl_exec($ch);
+        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        try {
+            $output = json_decode($response, true, 32);
+            if (!$output) {
+                throw new \Exception('Failed to parse JSON response.');
+            }
+            return $output;
+        } catch (\Exception $e) {
+            return [
+                'result' => '',
+                'error' => [
+                    'code' => (($httpcode == '200' ) ? '99999' : $httpcode),
+                    'message' => "Invalid JSON Response from API.  HTTP Code: $httpcode, Response: $response"
+                ]
+            ];
+        }
+    }
+
+    public function askQuestion($question)
+    {
+        $convo = $this->getConversation();
+        $query = $this->newQuery();
+        $convo[] = ['role' => 'user', 'content' => $question];
+        $query['messages'] = $convo;
+        $response = $this->query($query);
+        $responses = [];
+        if (!isset($response['choices'])) {
+            print_r($response);
+            die("\nOops\n");
+        }
+        foreach ($response['choices'] as $choice) {
+            $responses[] = [
+                'role' => 'assistant', 
+                'content' =>($choice['message']['content'] ?? 'null')
+            ];
+        }
+        foreach ($responses as $resp) {
+            $convo[] = $resp;
+        }
+        $this->saveConversation($convo);
+        return $responses;
+    }
+
+    private function getConversationList()
+    {
+        $dir = $this->path;
+        $glob = glob($dir . '/*');
+
+        $conversations = [];
+
+        $i = 1;
+        foreach ($glob as $file) {
+            if (is_file($file)) {
+                $raw = file_get_contents($file);
+                $body = json_decode($raw, true);
+                $conversations[] = [
+                    'index' => $i,
+                    'id' => basename($file),
+                    'preview' => ($body[0]['content'] ?? 'null')
+                ];
+                $i++;
+            }
+        }
+        return $conversations;
+    }
+
+    public function listConversations()
+    {
+        $dir = $this->path;
+        $glob = glob($dir . '/*');
+        $list = [];
+
+        $i = 1;
+        $conversations = $this->getConversationList();
+
+        foreach ($conversations as $conversation) {
+            $substr = substr($conversation['id']." : ".$conversation['preview'], 0, 120);
+            if (strlen($substr) >= 120) {
+                $substr .= '...';
+            }
+            $list[] = "(".$conversation['index'].") ".$substr;
+        }
+        return implode("\n", $list);
+    }
+
+    public function currentConversation()
+    {
+        $raw = file_get_contents($this->path.'/'.$this->currentId);
+        $body = json_decode($raw, true);
+        return $this->currentId." : ".($body[0]['content'] ?? 'null');
+    }
+
+    public function switch(int $id)
+    {
+        if ($id < 1000) {
+            $conversations = $this->getConversationList();
+            foreach($conversations as $conversation) {
+                if ($conversation['index'] == $id) {
+                    $id = $conversation['id'];
+                    break;
+                }
+            }
+        }
+        if (!file_exists($this->path."/$id")) {
+            throw new \Exception("Conversation $id does not exist.");
+        }
+        file_put_contents($this->path."/.current", $id);
+        $this->currentId = $id;
+        return $this->currentConversation();
+    }
+
+    public function replay()
+    {
+        print("\n");
+        $convo = $this->getConversation();
+        foreach($convo as $comment) {
+            if ($comment['role'] == 'user') {
+                print("\n----------------------User---------------------------\n");
+            } else {
+                print("\n=====================Venice==========================\n");
+            }
+            print($comment['content']."\n");
+        }
+    }
+}
+
+function usage()
+{
+    $usage  = "php venice.php new|ask 'question' (Ask question on an existing conversation, or create a new one)\n";
+    $usage .= "php venice.php ls (List conversations)\n";
+    $usage .= "php venice.php switch <conversation id> (Switch to another conversation id)\n";
+    $usage .= "php venice.php replay (replay conversation)\n";
+    return $usage;
+}
+
+if (count($argv) < 2) {
+    die(usage());
+}
+
+if (!in_array($argv[1], ['ask','new','ls','switch','current','replay'])) {
+    print("\nInvalid action '{$argv[1]}'\n");
+    die(usage());
+}
+
+$venice = new Venice(parse_ini_file(__DIR__.'/vconf.ini'));
+
+switch ($argv[1]) {
+    case 'new':
+        $venice->newConversation();
+    case 'ask':
+        print("\n\n");
+        $responses = $venice->askQuestion($argv[2]);
+        foreach ($responses as $response) {
+            print(($response['content'] ?? 'null')."\n");
+        }
+        break;
+    case 'ls':
+        print("\n\n".$venice->listConversations()."\n");
+        break;
+    case 'current':
+        print("\n\n".$venice->currentConversation()."\n");
+        break;
+    case 'switch':
+        print("\n\n".$venice->switch($argv[2])."\n");
+        break;
+    case 'replay':
+        print("\n\n".$venice->replay()."\n");
+        break;
+}
