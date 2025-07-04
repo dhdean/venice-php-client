@@ -1,2 +1,4 @@
+[CONFIG]
 conversations=/path/to/conversations
 token=
+[PERSONA]

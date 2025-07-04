@@ -8,18 +8,27 @@ class Venice {
     private $path;
     private $token;
     private $conversations;
+    private $personas;
 
     public function __construct(array $ini)
     {
-        if (!isset($ini['conversations']) || !$ini['conversations']) {
+        if (!isset($ini['CONFIG']) || !$ini['CONFIG']) {
+            throw new \Exception('INI file is missing CONFIG section.');
+        }
+        if (!isset($ini['CONFIG']['conversations']) || !$ini['CONFIG']['conversations']) {
             throw new \Exception('INI file is missing conversations path.');
         }
-        $this->conversations = new Conversations($ini['conversations']);
-        $this->path = $ini['conversations'];
-        if (!isset($ini['token']) || !$ini['token']) {
+        $this->conversations = new Conversations($ini['CONFIG']['conversations']);
+        $this->path = $ini['CONFIG']['conversations'];
+        if (!isset($ini['CONFIG']['token']) || !$ini['CONFIG']['token']) {
             throw new \Exception('INI file is missing API token.');
         }
-        $this->token = $ini['token'];
+        $this->token = $ini['CONFIG']['token'];
+        if (isset($ini['PERSONA']) && count($ini['PERSONA'])) {
+            $this->personas = $ini['PERSONA'];
+        } else {
+            $this->personas = [];
+        }
     }
 
     public function newConversation() {
@@ -73,11 +82,14 @@ class Venice {
         }
     }
 
-    public function askQuestion(string $question)
+    public function askQuestion(string $question, ?string $persona)
     {
         $conversationId = $this->conversations->getCurrentConversationId();
         $convo = $this->conversations->getConversation($conversationId);
         $query = $this->newQuery();
+        if ($persona && isset($this->personas[$persona])) {
+            $question = $this->personas[$persona]."\n".$question;
+        }
         $convo[] = ['role' => 'user', 'content' => $question];
         $query['messages'] = $convo;
         $response = $this->query($query);
@@ -171,11 +183,19 @@ class Venice {
             print($comment['content']."\n");
         }
     }
+
+    public function listPersonas()
+    {
+        print("\n");
+        foreach($this->personas as $id => $persona){
+            print("$id : $persona\n");
+        }
+    }
 }
 
 function usage()
 {
-    $usage  = "venice new|ask 'question' (Ask question on an existing conversation, or create a new one)\n";
+    $usage  = "venice new|ask 'question' [persona <persona>] (Ask question on an existing conversation, or create a new one)\n";
     $usage .= "venice ls                 (List conversations)\n";
     $usage .= "venice current            (Show current conversation)\n";
     $usage .= "venice switch <conv id>   (Switch to another conversation id)\n";
@@ -188,12 +208,12 @@ if (count($argv) < 2) {
     die(usage());
 }
 
-if (!in_array($argv[1], ['ask','new','ls','switch','current','replay','trash'])) {
+if (!in_array($argv[1], ['ask','new','ls','switch','current','replay','trash','ps'])) {
     print("\nInvalid action '{$argv[1]}'\n");
     die(usage());
 }
 
-$venice = new Venice(parse_ini_file(__DIR__.'/vconf.ini'));
+$venice = new Venice(parse_ini_file(__DIR__.'/vconf.ini', true));
 
 try { 
     switch ($argv[1]) {
@@ -201,13 +221,16 @@ try {
             $venice->newConversation();
         case 'ask':
             print("\n\n");
-            $responses = $venice->askQuestion($argv[2]);
+            $responses = $venice->askQuestion($argv[2], $argv[3] ?? null);
             foreach ($responses as $response) {
                 print(($response['content'] ?? 'null')."\n");
             }
             break;
         case 'ls':
             print("\n\n".$venice->listConversations()."\n");
+            break;
+        case 'ps':
+            print("\n\n".$venice->listPersonas()."\n");
             break;
         case 'current':
             print("\n\n".$venice->currentConversation()."\n");
