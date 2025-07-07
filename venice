@@ -88,7 +88,7 @@ class Venice {
         $convo = $this->conversations->getConversation($conversationId);
         $query = $this->newQuery();
         if ($persona && isset($this->personas[$persona])) {
-            $question = $this->personas[$persona]."\n".$question;
+            $question = $this->personas[$persona]."...".$question;
         }
         $convo[] = ['role' => 'user', 'content' => $question];
         $query['messages'] = $convo;
@@ -115,7 +115,7 @@ class Venice {
         $list = [];
         $conversations = $this->conversations->getConversations();
         foreach ($conversations as $conversation) {
-            $substr = substr($conversation['id']." : ".$conversation['preview'], 0, 120);
+            $substr = substr($conversation['id']." : ".$conversation['preview'], 0, 180);
             if (strlen($substr) >= 120) {
                 $substr .= '...';
             }
