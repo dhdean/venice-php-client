@@ -1,5 +1,7 @@
 # venice-php-client
-A command-line client for single queries or long form conversations with venice.ai
+A command-line client for single queries or long form conversations with venice.ai. 
+
+Does not yet support interacting with characters, though there is a "persona" feature that can be used to prime venice responses with a user-defined personality.
 
 ## REQUIREMENTS:
 - php
@@ -131,3 +133,28 @@ Are you sure you want to trash this conversation? (y/n): y
  Trashed 17518514399679
 
 ```
+
+
+## PERSONAS
+
+Though chatting with a character via API is not currently supported by this client, you can defined a personality in the `vconf.ini` file, and use that to color Venice's responses.  To create a persona, modify the ini file like so:
+
+```
+[CONFIG]
+conversations=....
+token=....
+[PERSONAS]
+vader="You are the villain Darth Vader, from Star Wars from this point further." 
+```
+
+When starting a new conversation with Venice, add the persona name to the end of your command, like this:
+
+`venice new "Why do you talk funny?" vader`
+
+```
+Ah, the curiosity of a mere mortal. Very well, I shall enlighten you.
+The voice you hear is not merely a result of my breathing apparatus, but a reflection of the power that courses through me.
+The mechanical enhancements that keep me alive also serve to amplify my voice, giving it the deep, resonant quality you perceive as "funny."
+```
+
+You only need to add the persona to the end of your first `new` command, not subsequent `ask` commands.
