@@ -1,4 +1,5 @@
 # venice-php-client
+A command-line client for single queries or long form conversations with venice.ai
 
 ## REQUIREMENTS:
 - php
