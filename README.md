@@ -158,3 +158,8 @@ The mechanical enhancements that keep me alive also serve to amplify my voice, g
 ```
 
 You only need to add the persona to the end of your first `new` command, not subsequent `ask` commands.
+
+To get a list of personas currently configured in the `vconf.ini` file, you can run this command:
+
+`venice ps`
+
