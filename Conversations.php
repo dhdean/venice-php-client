@@ -27,7 +27,7 @@ class Conversations {
 
     public function saveConversation(int $id, array $conversation)
     {
-        file_put_contents($this->path."/$id", json_encode($conversation));
+        file_put_contents($this->path."/$id", json_encode($conversation, JSON_PRETTY_PRINT));
     }
 
     public function getCurrentConversationId()

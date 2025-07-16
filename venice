@@ -9,6 +9,8 @@ class Venice {
     private $token;
     private $conversations;
     private $personas;
+    private $stream;
+    private $streamResponse;
 
     public function __construct(array $ini)
     {
@@ -17,6 +19,11 @@ class Venice {
         }
         if (!isset($ini['CONFIG']['conversations']) || !$ini['CONFIG']['conversations']) {
             throw new \Exception('INI file is missing conversations path.');
+        }
+        if (!isset($ini['CONFIG']['stream'])) {
+            $this->stream = false;
+        } else {
+            $this->stream = !!$ini['CONFIG']['stream'];
         }
         $this->conversations = new Conversations($ini['CONFIG']['conversations']);
         $this->path = $ini['CONFIG']['conversations'];
@@ -29,6 +36,7 @@ class Venice {
         } else {
             $this->personas = [];
         }
+        $this->streamResponse = [];
     }
 
     public function newConversation() {
@@ -38,10 +46,11 @@ class Venice {
     private function newQuery()
     {
         return [
+            "temperature" => 0.8,
             "model" => "venice-uncensored", 
             "messages" => [
             ],
-            "stream" => false
+            "stream" => $this->stream
         ];
     }
 
@@ -82,6 +91,58 @@ class Venice {
         }
     }
 
+    private function queryStream($body) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://api.venice.ai/api/v1/chat/completions');
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+        curl_setopt($ch, CURLOPT_HEADER, false);
+
+        $headers = [
+            'Authorization: Bearer '.$this->token,
+            'Content-Type: application/json'
+        ];
+
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Curl (vfan)');
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+
+        $stream = '';
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) use ($stream) {
+            // Store the data in a variable or process it quietly
+            foreach (explode("\n", $data) as $line) {
+                if (strpos($line, 'data: ') === 0) {
+                    $response = json_decode(trim(substr($line, 6)), true);
+                    if (isset($response['choices'][0]['delta']['content'])) {
+                        echo $response['choices'][0]['delta']['content'];
+                        $this->streamResponse[] = $response['choices'][0]['delta']['content'];
+                    }
+                }
+            }
+            return strlen($data); // Return the length of the data
+        });
+
+        if (!empty($headers)) {
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        }
+
+        $response = curl_exec($ch);
+
+        if($response === false) {
+            return("Error: ".curl_error($ch));
+        }
+
+        curl_close($ch);
+        $output = [
+            "choices" => [
+                'message' => [
+                    'content' => implode("", $this->streamResponse)
+                ]
+            ]
+        ];
+        return $output;
+    }
+
     public function askQuestion(string $question, ?string $persona)
     {
         $conversationId = $this->conversations->getCurrentConversationId();
@@ -92,7 +153,11 @@ class Venice {
         }
         $convo[] = ['role' => 'user', 'content' => $question];
         $query['messages'] = $convo;
-        $response = $this->query($query);
+        if ($this->stream) {
+            $response = $this->queryStream($query);
+        } else {
+            $response = $this->query($query);
+        }
         $responses = [];
         if (!isset($response['choices'])) {
             throw new \Exception("Got an unexpected response: ".json_encode($response));
@@ -184,6 +249,27 @@ class Venice {
         }
     }
 
+
+    public function undo()
+    {
+        print("\n");
+        $conversationId = $this->conversations->getCurrentConversationId();
+        $convo = $this->conversations->getConversation($conversationId);
+        $lastUserIndex = -1;
+        for ($i=0; $i<count($convo); $i++) {
+            if ($convo[$i]['role'] == 'user') 
+            {
+                $lastUserIndex = $i;
+            }
+        }
+        $out = [];
+        for ($i=0; $i<$lastUserIndex; $i++) {
+            $out[] = $convo[$i];
+        }
+        $this->conversations->saveConversation($conversationId, $out);
+        return "Removed: ".$convo[$lastUserIndex]['content']."\n";
+    }
+
     public function listPersonas()
     {
         print("\n");
@@ -196,11 +282,12 @@ class Venice {
 function usage()
 {
     $usage  = "venice new|ask 'question' [persona <persona>] (Ask question on an existing conversation, or create a new one)\n";
-    $usage .= "venice ls                 (List conversations)\n";
-    $usage .= "venice current            (Show current conversation)\n";
-    $usage .= "venice switch <conv id>   (Switch to another conversation id)\n";
-    $usage .= "venice replay             (Replay conversation)\n";
-    $usage .= "venice trash <conv id>    (Trash a conversation)\n";
+    $usage .= "venice ls                    (List conversations)\n";
+    $usage .= "venice current               (Show current conversation)\n";
+    $usage .= "venice switch <conv id>      (Switch to another conversation id)\n";
+    $usage .= "venice replay                (Replay conversation)\n";
+    $usage .= "venice trash <conv id> [y]   (Trash a conversation)\n";
+    $usage .= "venice undo                  (Undo the last exchange in the current conversation)\n";
     return $usage;
 }
 
@@ -208,7 +295,7 @@ if (count($argv) < 2) {
     die(usage());
 }
 
-if (!in_array($argv[1], ['ask','new','ls','switch','current','replay','trash','ps'])) {
+if (!in_array($argv[1], ['ask','new','ls','switch','current','replay','trash','ps', 'undo'])) {
     print("\nInvalid action '{$argv[1]}'\n");
     die(usage());
 }
@@ -241,10 +328,17 @@ try {
         case 'replay':
             print("\n\n".$venice->replay()."\n");
             break;
+        case 'undo':
+            print("\n\n".$venice->undo()."\n");
+            break;
         case 'trash':
             $conversation = $venice->getConversationById($argv[2]);
             print("\n\n(".$conversation['index'].") ".$conversation['id']." : ".$conversation['preview']."\n");
-            $confirmation = readline("Are you sure you want to trash this conversation? (y/n): ");
+            if (isset($argv[3]) && ($argv[3] == 'y')) {
+                $confirmation = 'y';
+            } else {
+                $confirmation = readline("Are you sure you want to trash this conversation? (y/n): ");
+            }
             if (strtolower($confirmation) === 'y') {
                 if ($venice->trash($conversation['id'])) {
                     print("\n\n Trashed ".$conversation['id']."\n");
