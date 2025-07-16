@@ -134,11 +134,11 @@ class Venice {
 
         curl_close($ch);
         $output = [
-            "choices" => [
+            "choices" => [[
                 'message' => [
                     'content' => implode("", $this->streamResponse)
                 ]
-            ]
+            ]]
         ];
         return $output;
     }
@@ -172,6 +172,9 @@ class Venice {
             $convo[] = $resp;
         }
         $this->conversations->saveConversation($conversationId, $convo);
+        if ($this->stream) {
+            return [];
+        }
         return $responses;
     }
 

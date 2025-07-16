@@ -1,4 +1,5 @@
 [CONFIG]
 conversations=/path/to/conversations
 token=
+stream=false
 [PERSONA]
